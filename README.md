@@ -1,4 +1,4 @@
-# YOLOv11 鼠类检测 → K230 部署
+# YOLOv11 目标检测训练 → K230 部署
 
 YOLOv11 目标检测模型训练（Colab）+ nncase kmodel 转换（本地），最终部署到 K230 开发板。
 
