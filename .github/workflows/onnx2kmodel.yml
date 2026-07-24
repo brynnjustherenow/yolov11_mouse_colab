@@ -1,0 +1,46 @@
+name: ONNX → K230 kmodel
+
+# 手动触发：在 GitHub 仓库的 Actions 页点 "Run workflow"，选择量化方案
+on:
+  workflow_dispatch:
+    inputs:
+      ptq:
+        description: 'PTQ 量化方案 (0=最小最快, 4=推荐高精度, 5=精度最高, all=全部对比)'
+        required: true
+        default: '0'
+        type: choice
+        options: ['0', '1', '2', '3', '4', '5', 'all']
+
+jobs:
+  convert:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 安装 nncase 及依赖
+        run: |
+          pip install nncase==2.11.0 nncase-kpu==2.11.0
+          pip install onnx onnxsim onnxruntime Pillow numpy
+
+      - name: 执行 ONNX → kmodel 转换
+        working-directory: yolov11_mouse_colab
+        run: |
+          if [ "${{ inputs.ptq }}" = "all" ]; then
+            python onnx2kmodel.py -a
+          else
+            python onnx2kmodel.py -p ${{ inputs.ptq }}
+          fi
+
+      - name: 上传 kmodel 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmodel-ptq-${{ inputs.ptq }}
+          path: yolov11_mouse_colab/*.kmodel
+          if-no-files-found: error
