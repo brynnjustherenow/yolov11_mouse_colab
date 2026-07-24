@@ -1,15 +1,29 @@
 name: ONNX → K230 kmodel
 
-# 手动触发：在 GitHub 仓库的 Actions 页点 "Run workflow"，选择量化方案
+# 触发方式：
+#   1. 推 tag（自动出 Release）：  git tag v1.0-nc2.11.0 && git push --tags
+#      tag 格式: v<版本>[-nc<nncase版本>][-ptq<0-5|all>]
+#      例: v1.0 | v1.0-nc2.9.0 | v1.0-nc2.11.0-ptq5
+#   2. 手动运行（只产 artifact，不建 Release）：Actions 页 Run workflow
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
-      ptq:
-        description: 'PTQ 量化方案 (0=最小最快, 4=推荐高精度, 5=精度最高, all=全部对比)'
+      nncase:
+        description: 'nncase 版本（手动运行用；推 tag 时从 tag 名解析）'
         required: true
-        default: '0'
+        default: '2.11.0'
+      ptq:
+        description: 'PTQ 量化方案'
+        required: true
+        default: 'all'
         type: choice
-        options: ['0', '1', '2', '3', '4', '5', 'all']
+        options: ['all', '0', '1', '2', '3', '4', '5']
+
+permissions:
+  contents: write   # 创建 Release 必需
 
 jobs:
   convert:
@@ -24,23 +38,53 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: 安装 nncase 及依赖
+      - name: 解析参数（nncase 版本 / PTQ 方案）
+        env:
+          INPUT_NNCASE: ${{ inputs.nncase }}
+          INPUT_PTQ: ${{ inputs.ptq }}
         run: |
-          pip install nncase==2.11.0 nncase-kpu==2.11.0
-          pip install onnx onnxsim onnxruntime Pillow numpy
+          if [ -n "$INPUT_NNCASE" ]; then
+            # 手动触发：用输入值
+            NNCASE_VER="$INPUT_NNCASE"
+            PTQ="$INPUT_PTQ"
+          else
+            # tag 触发：从 tag 名解析，缺省用默认值
+            TAG="${GITHUB_REF_NAME}"
+            NNCASE_VER="2.11.0"
+            PTQ="all"
+            if [[ "$TAG" =~ -nc([0-9.]+) ]]; then NNCASE_VER="${BASH_REMATCH[1]}"; fi
+            if [[ "$TAG" =~ -ptq([0-9]+|all) ]]; then PTQ="${BASH_REMATCH[1]}"; fi
+          fi
+          echo "NNCASE_VER=$NNCASE_VER" >> "$GITHUB_ENV"
+          echo "PTQ=$PTQ" >> "$GITHUB_ENV"
+          echo "==> nncase=$NNCASE_VER  ptq=$PTQ"
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install nncase==${NNCASE_VER} nncase-kpu==${NNCASE_VER}
 
       - name: 执行 ONNX → kmodel 转换
-        working-directory: yolov11_mouse_colab
         run: |
-          if [ "${{ inputs.ptq }}" = "all" ]; then
+          if [ "$PTQ" = "all" ]; then
             python onnx2kmodel.py -a
           else
-            python onnx2kmodel.py -p ${{ inputs.ptq }}
+            python onnx2kmodel.py -p "$PTQ" -o "exp_ptq${PTQ}.kmodel"
           fi
 
-      - name: 上传 kmodel 产物
+      - name: 上传 kmodel 为 artifact（手动触发时下载用）
         uses: actions/upload-artifact@v4
         with:
-          name: kmodel-ptq-${{ inputs.ptq }}
-          path: yolov11_mouse_colab/*.kmodel
+          name: kmodel-ptq-${{ env.PTQ }}
+          path: '*.kmodel'
           if-no-files-found: error
+
+      - name: 发布到 GitHub Release（仅推 tag 时触发）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '*.kmodel'
+          generate_release_notes: true
+          body: |
+            nncase 版本: ${{ env.NNCASE_VER }}
+            PTQ 方案: ${{ env.PTQ }}
