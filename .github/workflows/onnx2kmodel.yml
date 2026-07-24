@@ -32,6 +32,11 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@v4
 
+      - name: 安装 .NET 7 运行时（nncase 依赖）
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '7.0.x'
+
       - name: 安装 Python 3.10
         uses: actions/setup-python@v5
         with:
